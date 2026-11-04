@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Youtube,
   Radio,
@@ -10,18 +10,29 @@ import {
   Terminal,
   Loader2,
   Plug,
+  RotateCcw,
 } from "lucide-react";
 import { useVideo } from "@/hooks/use-video";
 import { useStream } from "@/hooks/use-stream";
 import { useStreamStore } from "@/stores/stream-store";
+import {
+  useSettingsStore,
+  resolveTitleTemplate,
+} from "@/stores/settings-store";
 import { VideoUpload } from "./video-upload";
 import { VideoPreview } from "./video-preview";
 import { StreamControls } from "./stream-controls";
 import { StreamStatus as StreamStatusPanel } from "./stream-status";
 import { StreamLogs } from "./stream-logs";
+import { SettingsDialog } from "./settings-dialog";
 import { Progress } from "@/components/ui/progress";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import type { StreamConfig, UploadUrlResponse } from "@/types/stream";
+import type {
+  StreamConfig,
+  StreamStatus,
+  UploadUrlResponse,
+} from "@/types/stream";
 
 const DEFAULT_CONFIG: StreamConfig = {
   title: "",
@@ -44,11 +55,86 @@ export function StreamDashboard() {
   const { video, error, isProbing, selectFile, clear } = useVideo();
   const { requestUploadUrl, uploadFile, startLive, stopLive } = useStream();
   const store = useStreamStore();
+  const settings = useSettingsStore();
+  const settingsHydrated = useSettingsStore((s) => s._hydrated);
 
-  const [config, setConfig] = useState<StreamConfig>(DEFAULT_CONFIG);
+  // Track whether the user has begun interacting with the form. Once they have,
+  // we never overwrite their values from settings.
+  const configDirtyRef = useRef(false);
+  const appliedHydrationRef = useRef(false);
+
+  // Build the initial config from settings, falling back to DEFAULT_CONFIG
+  // when the settings store hasn't hydrated yet.
+  const initialConfig: StreamConfig = useMemo(
+    () =>
+      settingsHydrated
+        ? {
+            title: "",
+            description: settings.defaultDescription,
+            loop: settings.defaultLoop,
+            resolution: settings.defaultResolution,
+            privacy: settings.defaultPrivacy,
+          }
+        : DEFAULT_CONFIG,
+    [settingsHydrated, settings]
+  );
+  const [config, setConfig] = useState<StreamConfig>(initialConfig);
+
+  // When settings hydrate AFTER first render (e.g. localStorage read finishes),
+  // apply the defaults once if the user hasn't touched the form yet.
+  // We defer the setState via requestAnimationFrame so it's NOT synchronous
+  // inside the effect body, avoiding cascading renders.
+  useEffect(() => {
+    if (!settingsHydrated) return;
+    if (appliedHydrationRef.current) return;
+    if (configDirtyRef.current) {
+      appliedHydrationRef.current = true;
+      return;
+    }
+    if (store.status !== "idle" || store.streamId) {
+      appliedHydrationRef.current = true;
+      configDirtyRef.current = true;
+      return;
+    }
+    appliedHydrationRef.current = true;
+    const id = requestAnimationFrame(() => {
+      setConfig({
+        title: "",
+        description: settings.defaultDescription,
+        loop: settings.defaultLoop,
+        resolution: settings.defaultResolution,
+        privacy: settings.defaultPrivacy,
+      });
+    });
+    return () => cancelAnimationFrame(id);
+  }, [settingsHydrated, settings, store.status, store.streamId]);
+
   const [destination, setDestination] = useState<DestinationInfo | null>(null);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [activeUploadId, setActiveUploadId] = useState<string | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
+  // Auto-clear logs when the stream returns to idle, if enabled.
+  const prevStatusRef = useRef<StreamStatus>(store.status);
+  useEffect(() => {
+    const prev = prevStatusRef.current;
+    prevStatusRef.current = store.status;
+    if (
+      settings.autoClearLogsOnIdle &&
+      prev !== "idle" &&
+      store.status === "idle" &&
+      store.logs.length > 0
+    ) {
+      store.clearLogs();
+      store.pushLog("info", "Auto-cleared previous event log.");
+    }
+  }, [store.status, settings.autoClearLogsOnIdle]);
+
+  // Apply accent variant to the document root as a data attribute.
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    document.documentElement.setAttribute("data-accent", settings.accent);
+  }, [settings.accent]);
 
   // Fetch YouTube destination + provider info on mount.
   useEffect(() => {
@@ -78,6 +164,7 @@ export function StreamDashboard() {
   }, []);
 
   const onConfigChange = useCallback((patch: Partial<StreamConfig>) => {
+    configDirtyRef.current = true;
     setConfig((cur) => ({ ...cur, ...patch }));
   }, []);
 
@@ -137,6 +224,26 @@ export function StreamDashboard() {
     await stopLive();
   }, [stopLive]);
 
+  const handleReset = useCallback(async () => {
+    store.pushLog("info", "Resetting provider state…");
+    try {
+      const res = await fetch("/api/stream/reset", { method: "POST" });
+      const data = await res.json();
+      store.pushLog("success", data.message ?? "Reset complete.");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Reset failed";
+      store.pushLog("error", msg);
+    }
+    // Clear local stream state regardless.
+    store.setStreamId(null);
+    store.setStatus("idle");
+    store.setStarting(false);
+    store.setStopping(false);
+    store.setError(null);
+    setActiveUploadId(null);
+    setUploadProgress(null);
+  }, [store]);
+
   const handleSelectFile = useCallback(
     (file: File | null | undefined) => {
       // If a stream is currently active, do not allow swapping the video.
@@ -148,21 +255,20 @@ export function StreamDashboard() {
         return;
       }
       selectFile(file);
-      // Auto-title from filename (only if the user hasn't customized the title).
+      // Auto-title from the user's title template (only if not customized).
       if (file) {
         setConfig((cur) => {
           if (cur.title.trim().length > 0) return cur;
-          const base = file.name
-            .replace(/\.[^.]+$/, "")
-            .replace(/[_-]+/g, " ")
-            .trim();
-          return { ...cur, title: base || "Untitled broadcast" };
+          const tmpl = settings.defaultTitleTemplate?.trim();
+          if (!tmpl) return cur;
+          const title = resolveTitleTemplate(tmpl, { filename: file.name });
+          return { ...cur, title: title || "Untitled broadcast" };
         });
       } else {
         setConfig((cur) => ({ ...cur, title: "" }));
       }
     },
-    [selectFile, store]
+    [selectFile, store, settings.defaultTitleTemplate]
   );
 
   const handleClearVideo = useCallback(() => {
@@ -211,6 +317,21 @@ export function StreamDashboard() {
                   {destination.provider === "mux" ? "Mux" : "Demo"}
                 </span>
               )}
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-9 w-9 text-muted-foreground hover:text-foreground hover:bg-muted/40"
+                onClick={() => setSettingsOpen(true)}
+                aria-label="Open settings"
+              >
+                <Settings2 className="h-4 w-4" />
+              </Button>
+              <SettingsDialog
+                open={settingsOpen}
+                onOpenChange={setSettingsOpen}
+                destination={destination}
+              />
             </div>
           </div>
         </div>
@@ -290,6 +411,7 @@ export function StreamDashboard() {
                 isStarting={store.isStarting}
                 isStopping={store.isStopping}
                 isUploading={isUploading}
+                showAdvancedByDefault={settings.showAdvancedByDefault}
                 onStart={handleStart}
                 onStop={handleStop}
               />
@@ -344,8 +466,18 @@ export function StreamDashboard() {
                 />
 
                 {store.error && (
-                  <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">
-                    {store.error}
+                  <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive space-y-2">
+                    <p>{store.error}</p>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={handleReset}
+                      className="h-7 text-[11px] gap-1.5 border-destructive/30 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                    >
+                      <RotateCcw className="h-3 w-3" />
+                      Reset state
+                    </Button>
                   </div>
                 )}
               </div>

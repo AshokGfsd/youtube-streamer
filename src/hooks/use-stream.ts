@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef } from "react";
 import { useStreamStore } from "@/stores/stream-store";
+import { useSettingsStore } from "@/stores/settings-store";
 import type {
   StartStreamInput,
   StatusStreamResponse,
@@ -29,10 +30,12 @@ interface UseStreamResult {
   refreshStatus: () => Promise<void>;
 }
 
-const STATUS_POLL_MS = 5000;
-
 export function useStream(): UseStreamResult {
   const store = useStreamStore();
+  const pollIntervalSec = useSettingsStore((s) => s.pollIntervalSec);
+  const pollMsRef = useRef(pollIntervalSec * 1000);
+  pollMsRef.current = pollIntervalSec * 1000;
+
 
   const requestUploadUrl = useCallback(async (): Promise<UploadUrlResponse | null> => {
     try {
@@ -209,10 +212,10 @@ export function useStream(): UseStreamResult {
         .catch(() => {
           /* ignore transient errors */
         });
-    }, STATUS_POLL_MS);
+    }, pollMsRef.current);
 
     return () => window.clearInterval(interval);
-  }, [store.streamId, store.status, store]);
+  }, [store.streamId, store.status, store, pollIntervalSec]);
 
   return {
     requestUploadUrl,

@@ -31,6 +31,7 @@ interface StreamControlsProps {
   isStarting: boolean;
   isStopping: boolean;
   isUploading: boolean;
+  showAdvancedByDefault?: boolean;
   onStart: () => void;
   onStop: () => void;
 }
@@ -43,10 +44,11 @@ export function StreamControls({
   isStarting,
   isStopping,
   isUploading,
+  showAdvancedByDefault = false,
   onStart,
   onStop,
 }: StreamControlsProps) {
-  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(showAdvancedByDefault);
 
   const canStart = useMemo(() => {
     if (!hasVideo) return false;

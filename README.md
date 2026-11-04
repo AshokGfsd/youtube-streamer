@@ -94,8 +94,34 @@ Open the preview at the URL Vercel assigns (or the local sandbox preview panel �
 | `/api/stream/start`        | POST   | Start the broadcast (creates Mux Live Stream)       |
 | `/api/stream/stop`         | POST   | Stop the broadcast (disables the Mux Live Stream)   |
 | `/api/stream/status`       | GET    | Poll the current stream status                       |
+| `/api/stream/reset`        | POST   | Forcibly clear all in-memory demo streams (demo only) |
 | `/api/provider/webhook`    | POST   | Receive Mux webhook events                          |
 | `/api/youtube/destination` | GET    | Safe-to-expose YouTube metadata + provider mode     |
+
+## Dashboard settings popup
+
+Click the **gear icon** in the top-right of the header to open the settings dialog. All preferences are persisted to `localStorage` (key: `yls:settings:v1`) and survive page reloads. They never leave your browser.
+
+**Defaults tab**
+- Title template — supports `{filename}`, `{date}`, `{time}`, `{datetime}` tokens (e.g. `{filename} — Live`)
+- Default description, resolution, privacy, loop toggle
+- Show advanced settings expanded by default
+
+**Behaviour tab**
+- Status polling interval (3 / 5 / 10 / 15 seconds)
+- Event log capacity (50 / 100 / 200 / 500 entries)
+- Auto-clear logs when the stream returns to idle
+- Auto-start preview playback on video selection
+- Compact log row spacing
+- Accent colour (YouTube Red / Amber / Emerald / Violet) — applies live via `[data-accent]` on `<html>`
+
+**Connection tab** (read-only)
+- Streaming provider mode (Mux or Demo)
+- YouTube channel name + masked stream key preview
+- Show/hide the masked stream key preview
+- Explanation of why credentials must stay in Vercel env vars (not localStorage)
+
+> **Note on credentials**: Mux tokens and the YouTube stream key are server-side secrets and CANNOT be stored in localStorage — the Vercel Route Handlers need to read them on the server. The settings popup only manages client-side preferences; the Connection tab is a read-only view of the server's env-var state.
 
 ## Project structure
 
@@ -103,7 +129,7 @@ Open the preview at the URL Vercel assigns (or the local sandbox preview panel �
 src/
 ├── app/
 │   ├── api/
-│   │   ├── stream/{start,stop,status}/route.ts
+│   │   ├── stream/{start,stop,status,reset}/route.ts
 │   │   ├── provider/{upload-url,webhook}/route.ts
 │   │   └── youtube/destination/route.ts
 │   ├── globals.css
@@ -116,16 +142,18 @@ src/
 │   │   ├── video-preview.tsx
 │   │   ├── stream-controls.tsx
 │   │   ├── stream-status.tsx
-│   │   └── stream-logs.tsx
+│   │   ├── stream-logs.tsx
+│   │   └── settings-dialog.tsx     (popup, persisted to localStorage)
 │   └── ui/  (shadcn)
 ├── hooks/
 │   ├── use-video.ts
 │   └── use-stream.ts
 ├── services/
-│   ├── streaming-provider.ts   (server-only, Mux + demo)
+│   ├── streaming-provider.ts   (server-only, Mux + demo + resetAll)
 │   └── youtube.ts               (server-only, stream key access)
 ├── stores/
-│   └── stream-store.ts          (Zustand)
+│   ├── stream-store.ts          (Zustand, runtime stream state)
+│   └── settings-store.ts        (Zustand + persist → localStorage)
 ├── types/
 │   └── stream.ts
 └── lib/

@@ -97,6 +97,16 @@ async function demoCreateUploadUrl(): Promise<UploadUrlResponse> {
 async function demoStartStream(
   input: StartStreamInput
 ): Promise<{ streamId: string; status: StreamStatus; message: string }> {
+  // Auto-clean any streams stuck in "starting" for more than 30 seconds
+  // (defensive — if the simulated transition timer was lost e.g. on HMR).
+  const now = Date.now();
+  for (const [id, s] of demoStreams.entries()) {
+    if (s.status === "starting" && now - s.createdAt > 30_000) {
+      demoStreams.delete(id);
+      if (demoCurrentStreamId === id) demoCurrentStreamId = null;
+    }
+  }
+
   // Only one concurrent demo stream is allowed.
   for (const s of demoStreams.values()) {
     if (s.status === "live" || s.status === "starting") {
@@ -176,13 +186,31 @@ async function demoGetStatus(streamId: string | null): Promise<StatusStreamRespo
       provider: "demo",
     };
   }
+  // Resilient state advancement — derive the current status from elapsed time
+  // so we don't depend solely on setTimeout (which is lost on HMR / restart).
+  const now = Date.now();
+  const elapsedSinceCreate = now - s.createdAt;
+  if (s.status === "starting" && elapsedSinceCreate > 2500) {
+    s.status = "live";
+    s.startedAt = s.startedAt ?? now - 2500;
+  }
+  // If we're "stopping" but enough time has passed, advance to idle.
+  if (s.status === "stopping") {
+    const stoppedAt = s.startedAt ?? s.createdAt;
+    if (now - stoppedAt > 5000 || elapsedSinceCreate > 5000) {
+      // Heuristic — the stop transition should have completed by now.
+      s.status = "idle";
+      s.startedAt = null;
+      if (demoCurrentStreamId === streamId) demoCurrentStreamId = null;
+    }
+  }
   const uptimeSec =
     s.startedAt && s.status === "live"
-      ? Math.floor((Date.now() - s.startedAt) / 1000)
+      ? Math.floor((now - s.startedAt) / 1000)
       : null;
   // Fake bitrate of 4.5 Mbps so the dashboard shows a moving bytes counter.
   if (s.status === "live" && s.startedAt) {
-    s.bytesProcessed = Math.floor(((Date.now() - s.startedAt) / 1000) * 562_500);
+    s.bytesProcessed = Math.floor(((now - s.startedAt) / 1000) * 562_500);
   }
   return {
     streamId: s.streamId,
@@ -425,5 +453,20 @@ export const streamingProvider = {
     return getProviderMode() === "mux"
       ? muxGetStatus(streamId)
       : demoGetStatus(streamId);
+  },
+
+  /**
+   * Demo-only helper: forcibly clear ALL in-memory demo streams.
+   * Used by /api/stream/reset to recover from stuck state without
+   * restarting the dev server. In Mux mode this is a no-op.
+   */
+  async resetAll(): Promise<{ cleared: number; provider: ProviderName }> {
+    if (getProviderMode() !== "mux") {
+      const cleared = demoStreams.size;
+      demoStreams.clear();
+      demoCurrentStreamId = null;
+      return { cleared, provider: "demo" };
+    }
+    return { cleared: 0, provider: "mux" };
   },
 };

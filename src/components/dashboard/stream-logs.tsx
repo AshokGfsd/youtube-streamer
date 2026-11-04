@@ -5,6 +5,7 @@ import { Info, CheckCircle2, AlertTriangle, XCircle, Trash2, ScrollText } from "
 import { Button } from "@/components/ui/button";
 import { cn, formatTime } from "@/lib/utils";
 import { useStreamStore } from "@/stores/stream-store";
+import { useSettingsStore } from "@/stores/settings-store";
 import type { LogLevel } from "@/types/stream";
 
 const LEVEL_ICON: Record<LogLevel, React.ReactNode> = {
@@ -24,6 +25,7 @@ const LEVEL_TEXT: Record<LogLevel, string> = {
 export function StreamLogs() {
   const logs = useStreamStore((s) => s.logs);
   const clearLogs = useStreamStore((s) => s.clearLogs);
+  const compactLogs = useSettingsStore((s) => s.compactLogs);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Newest entry is at the top, so no auto-scroll needed.
@@ -74,13 +76,16 @@ export function StreamLogs() {
             No events yet. Select a video and click Start Live.
           </div>
         ) : (
-          <ul className="space-y-1">
+          <ul className={cn(compactLogs ? "space-y-0" : "space-y-1")}>
             {logs.map((log) => (
               <li
                 key={log.id}
-                className="flex items-start gap-2 rounded-md px-1.5 py-1 hover:bg-muted/30"
+                className={cn(
+                  "flex items-start gap-2 rounded-md hover:bg-muted/30",
+                  compactLogs ? "px-1.5 py-0.5" : "px-1.5 py-1"
+                )}
               >
-                <span className="mt-0.5 shrink-0">
+                <span className={cn("shrink-0", compactLogs && "mt-0")}>
                   {LEVEL_ICON[log.level]}
                 </span>
                 <span className="shrink-0 font-mono text-[10px] text-muted-foreground/70 tabular-nums">
@@ -88,7 +93,8 @@ export function StreamLogs() {
                 </span>
                 <span
                   className={cn(
-                    "min-w-0 flex-1 text-[11px] leading-relaxed break-words",
+                    "min-w-0 flex-1 text-[11px] break-words",
+                    compactLogs ? "leading-snug" : "leading-relaxed",
                     LEVEL_TEXT[log.level]
                   )}
                 >

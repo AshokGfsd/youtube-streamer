@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Play, Volume2, VolumeX, Maximize2 } from "lucide-react";
 import type { VideoMeta } from "@/types/stream";
+import { useSettingsStore } from "@/stores/settings-store";
 
 interface VideoPreviewProps {
   video: VideoMeta | null;
@@ -13,16 +14,17 @@ interface VideoPreviewProps {
 export function VideoPreview({ video, loop, isLive = false }: VideoPreviewProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [muted, setMuted] = useState(true);
+  const autoStartPreview = useSettingsStore((s) => s.autoStartPreview);
 
   // Reset playback when a new video is selected.
   useEffect(() => {
     const v = videoRef.current;
     if (!v) return;
     v.currentTime = 0;
-    if (isLive) {
+    if (isLive || autoStartPreview) {
       v.play().catch(() => {});
     }
-  }, [video?.id, isLive]);
+  }, [video?.id, isLive, autoStartPreview]);
 
   // Apply the loop setting reactively.
   useEffect(() => {

@@ -267,3 +267,44 @@
   0% { background-position: 200% 0; }
   100% { background-position: -200% 0; }
 }
+
+/* =========================================================
+   Accent variants — selected via [data-accent] on <html>.
+   Default = red (YouTube). These override --primary and a
+   few derived colors; everything else stays the same.
+   ========================================================= */
+:root,
+html[data-accent="red"] {
+  --primary: oklch(0.62 0.22 25);
+  --ring: oklch(0.62 0.22 25);
+  --sidebar-primary: oklch(0.62 0.22 25);
+  --sidebar-ring: oklch(0.62 0.22 25);
+  --destructive: oklch(0.62 0.24 25);
+}
+
+html[data-accent="amber"] {
+  --primary: oklch(0.78 0.16 75);
+  --primary-foreground: oklch(0.18 0.02 270);
+  --ring: oklch(0.78 0.16 75);
+  --sidebar-primary: oklch(0.78 0.16 75);
+  --sidebar-ring: oklch(0.78 0.16 75);
+  --destructive: oklch(0.62 0.24 25);
+}
+
+html[data-accent="emerald"] {
+  --primary: oklch(0.65 0.18 165);
+  --primary-foreground: oklch(0.10 0.02 180);
+  --ring: oklch(0.65 0.18 165);
+  --sidebar-primary: oklch(0.65 0.18 165);
+  --sidebar-ring: oklch(0.65 0.18 165);
+  --destructive: oklch(0.62 0.24 25);
+}
+
+html[data-accent="violet"] {
+  --primary: oklch(0.62 0.20 280);
+  --primary-foreground: oklch(0.99 0 0);
+  --ring: oklch(0.62 0.20 280);
+  --sidebar-primary: oklch(0.62 0.20 280);
+  --sidebar-ring: oklch(0.62 0.20 280);
+  --destructive: oklch(0.62 0.24 25);
+}

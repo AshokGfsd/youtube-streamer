@@ -8,6 +8,7 @@ import type {
   StreamStoreState,
 } from "@/types/stream";
 import { makeId } from "@/lib/utils";
+import { useSettingsStore } from "@/stores/settings-store";
 
 interface StreamStoreActions {
   setStatus: (status: StreamStatus, message?: string) => void;
@@ -29,7 +30,7 @@ interface StreamStoreActions {
   reset: () => void;
 }
 
-const MAX_LOGS = 200;
+const FALLBACK_MAX_LOGS = 200;
 
 const initialState: StreamStoreState = {
   status: "idle",
@@ -78,13 +79,24 @@ export const useStreamStore = create<
 
   pushLog: (level, message) =>
     set((s) => {
+      // Read the user-configurable max logs from the settings store.
+      // If the settings store hasn't hydrated yet, fall back to a sane default.
+      let maxLogs: number = FALLBACK_MAX_LOGS;
+      try {
+        const settingsState = useSettingsStore.getState();
+        if (settingsState && typeof settingsState.maxLogs === "number") {
+          maxLogs = settingsState.maxLogs;
+        }
+      } catch {
+        /* settings store not ready — keep fallback */
+      }
       const entry: LogEntry = {
         id: makeId("log"),
         ts: Date.now(),
         level,
         message,
       };
-      const logs = [entry, ...s.logs].slice(0, MAX_LOGS);
+      const logs = [entry, ...s.logs].slice(0, maxLogs);
       return { logs };
     }),
 
