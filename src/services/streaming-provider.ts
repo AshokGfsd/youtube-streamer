@@ -266,7 +266,10 @@ async function muxCreateUploadUrl(): Promise<UploadUrlResponse> {
     },
     body: JSON.stringify({
       cors_origin: process.env.NEXT_PUBLIC_APP_URL ?? "*",
-      new_asset_settings: { playback_policy: ["private"] },
+      // Mux only accepts "public" or "signed" (NOT "private").
+      // Use "signed" so the staging asset's playback URL requires a signing
+      // key — appropriate for a source file the encoder will pull from.
+      new_asset_settings: { playback_policy: ["signed"] },
     }),
   });
   if (!res.ok) {
