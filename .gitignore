@@ -30,8 +30,10 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
-.env*
+# env files (NEVER commit secrets — use Vercel env vars for production)
+.env
+.env.*
+!.env.example
 
 # vercel
 .vercel
@@ -43,12 +45,21 @@ next-env.d.ts
 local-*
 .claude
 .z-ai-config
+
+# logs
 *.log
 dev.log
 dev.out.log
-test
-prompt
-
 server.log
-# Skills directory
+
+# sqlite database (local runtime only)
+db/*.db
+db/*.db-journal
+db/*.db-shm
+db/*.db-wal
+
+# runtime / pid files
+.zscripts/*.pid
+
+# skills directory (vendored, not source)
 /skills/

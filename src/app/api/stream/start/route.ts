@@ -3,6 +3,21 @@ import { startStreamSchema } from "@/lib/validations";
 import { streamingProvider } from "@/services/streaming-provider";
 
 /**
+ * Allow this route to run for up to 5 minutes — Mux can take 60–120s to
+ * process larger uploaded assets before we can create the Live Stream.
+ *
+ * Default Vercel limits:
+ *   - Hobby plan: max 60s (configure in vercel.json or via this export)
+ *   - Pro plan:   max 300s
+ *   - Enterprise: up to 900s
+ *
+ * If you're on Hobby and your video takes >60s to process on Mux's side,
+ * upgrade to Pro OR decouple this into an async job queue (e.g. QStash).
+ */
+export const maxDuration = 300;
+export const runtime = "nodejs";
+
+/**
  * Starts a broadcast. The browser has already uploaded the local video file
  * directly to the provider (via /api/provider/upload-url), and now passes
  * the `videoUploadId` so the server can create a Live Stream + Simulcast

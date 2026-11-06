@@ -298,29 +298,93 @@ async function muxStartStream(
   input: StartStreamInput
 ): Promise<{ streamId: string; status: StreamStatus; message: string }> {
   // 1) Wait for the uploaded asset to be ready.
-  //    The uploadId IS the asset source. After the browser PUTs the file
-  //    Mux creates the asset asynchronously. We poll its status briefly.
+  //    The uploadId IS the asset source. After the browser PUTs the file,
+  //    Mux creates the asset asynchronously. The upload record's status goes:
+  //      waiting → asset_created (asset_id populated)
+  //    Then the asset itself goes: preparing → ready.
+  //    For larger videos this can take 60–90s, so we poll up to 3 minutes.
   let asset: MuxAsset | null = null;
-  for (let i = 0; i < 30; i++) {
+  let lastUploadStatus = "unknown";
+  let lastAssetId: string | undefined;
+  let lastAssetStatus = "unknown";
+
+  const POLL_ATTEMPTS = 90; // 90 × 2s = 180s max
+  const POLL_INTERVAL_MS = 2000;
+
+  for (let i = 0; i < POLL_ATTEMPTS; i++) {
     const r = await fetch(
       `https://api.mux.com/video/v1/uploads/${input.videoUploadId}`,
       { headers: { Authorization: muxAuthHeader() } }
     );
-    if (!r.ok) break;
-    const j = (await r.json()) as { data: { asset_id?: string; status: string } };
+    if (!r.ok) {
+      const txt = await r.text().catch(() => "");
+      throw new Error(
+        `Mux upload-status fetch failed: ${r.status} ${txt.slice(0, 200)}`
+      );
+    }
+    const j = (await r.json()) as {
+      data: { asset_id?: string; status: string };
+    };
+    lastUploadStatus = j.data.status;
+    lastAssetId = j.data.asset_id;
+
+    // Detect terminal failure states of the upload itself.
+    if (j.data.status === "errored") {
+      throw new Error(
+        "Mux upload reported status='errored'. The browser PUT likely failed mid-stream — check your network and try again."
+      );
+    }
+    if (j.data.status === "timed_out") {
+      throw new Error(
+        "Mux upload timed out. The browser PUT never completed within Mux's allowed window. Check that NEXT_PUBLIC_APP_URL matches your deployed origin (CORS)."
+      );
+    }
+    if (j.data.status === "cancelled") {
+      throw new Error("Mux upload was cancelled.");
+    }
+
     if (j.data.asset_id) {
       const ar = await fetch(
         `https://api.mux.com/video/v1/assets/${j.data.asset_id}`,
         { headers: { Authorization: muxAuthHeader() } }
       );
+      if (!ar.ok) {
+        const txt = await ar.text().catch(() => "");
+        throw new Error(
+          `Mux asset-status fetch failed: ${ar.status} ${txt.slice(0, 200)}`
+        );
+      }
       asset = (await ar.json()) as MuxAsset;
+      lastAssetStatus = asset.status;
       if (asset.status === "ready") break;
+      if (asset.status === "errored") {
+        throw new Error(
+          `Mux asset processing errored (asset_id=${j.data.asset_id}). The uploaded file may be in an unsupported format.`
+        );
+      }
     }
-    await new Promise((r) => setTimeout(r, 1000));
+    await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
   }
+
   if (!asset || asset.status !== "ready") {
+    if (!lastAssetId) {
+      // Upload record exists but asset_id never appeared — the browser PUT
+      // almost certainly failed (e.g. CORS origin mismatch) before reaching
+      // Mux. The dashboard's uploadFile() XHR may have reported success
+      // prematurely, OR the upload is still in `waiting` state.
+      throw new Error(
+        `Upload did not complete after ${Math.round(
+          (POLL_ATTEMPTS * POLL_INTERVAL_MS) / 1000
+        )}s. Upload record status: "${lastUploadStatus}". ` +
+          `This usually means the browser PUT to Mux was rejected (CORS, network, or auth). ` +
+          `Verify NEXT_PUBLIC_APP_URL is set to your deployed origin exactly (e.g. https://your-app.vercel.app).`
+      );
+    }
     throw new Error(
-      "Uploaded asset is not ready yet, or the upload did not complete. Try again in a few seconds."
+      `Asset is still preparing after ${Math.round(
+        (POLL_ATTEMPTS * POLL_INTERVAL_MS) / 1000
+      )}s. asset_id=${lastAssetId}, asset status="${lastAssetStatus}". ` +
+        `Mux may be processing a large file — wait a moment and try Start Live again.`
     );
   }
 
